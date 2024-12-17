@@ -67,11 +67,32 @@ rocksdb_test.go:130: Unexpected value for key 'key-971': got '' want 'value-971'
 ```
 
 ### Corrupted SST
-RocksDB ignored more corruption than Pebble. Even after multiple corruption attempts data verification passed. I'm
-not sure how it achieved this feat, unless `db.Close()` doesn't completely unload the SSTable pages cached in memory,
-which is likely an artifact of the `grocksdb` bindings and not rocksDB it's self.
+RocksDB ignored more corruption than Pebble. Even after multiple random corruption attempts data verification passed.
+I'm not sure how it achieved this feat, unless `db.Close()` doesn't completely unload the SSTable pages cached in
+memory, which is likely an artifact of the `grocksdb` bindings and not rocksDB it's self.
 
-I was unable to get RocksDB to report an error when calling `Get()` only when calling `OpenDb()`.
+In order to test this theory, I modified the test to create the data tables then `os.Exit()` the test. On subsequent
+runs the test only read the key/values and verified the correct data. I had to open the SST and manually edit the file
+with a HEX editor, changing the `value-26` to `value-X6` before I got a checksum error when fetching a key.
+
+The database remained available in the face of corruption, as I was able to retrieve key values within the same 
+table, but in different blocks where the corruption did not exist.
+```
+=== RUN   TestRocksDBSSTCorruption
+rocksdb_test.go:132: Failed to read key key-3: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-4: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-27: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-28: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-29: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-30: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-31: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-32: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+rocksdb_test.go:132: Failed to read key key-33: Corruption: block checksum mismatch: stored(context removed) = 1930575595, computed = 3064321270, type = 4  in rocksdb/000008.sst offset 1613 size 1621
+```
+
+In most cases, opening a file with corrupt data was acceptable. However, I was able to corrupt the file enough
+that `OpenDb()` returned a checksum error, reporting the manifest was corrupt.
+
 ```
 === RUN   TestRocksDBSSTCorruption
 rocksdb_test.go:107: Corrupting Database Offset: 7218

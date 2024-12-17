@@ -19,5 +19,5 @@ test:
 	@echo "CGO_CFLAGS: $(CGO_CFLAGS)"
 	@echo "CGO_LDFLAGS: $(CGO_LDFLAGS)"
 	#go test -v -p=1 -count=1 ./... -v -tags rocksdb -run ^TestRocksDB*$
-	#go test -v -p=1 -count=1 ./... -v -tags rocksdb -run ^TestRocksDBSSTCorruption$
-	go test -v -p=1 -count=1 ./... -v -tags rocksdb -run ^TestRocksDBWALCorruption$
+	go test -v -p=1 -count=1 ./... -v -tags rocksdb -run ^TestRocksDBSSTCorruption$
+	#go test -v -p=1 -count=1 ./... -v -tags rocksdb -run ^TestRocksDBWALCorruption$

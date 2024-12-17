@@ -65,6 +65,7 @@ func TestRocksDBSSTCorruption(t *testing.T) {
 	dir, err := os.MkdirTemp("", "rocksdb-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
+	// dir := "rocksdb"
 
 	log := grocksdb.NewStderrLogger(grocksdb.WarnInfoLogLevel, "ROCKSDB")
 	defer log.Destroy()
@@ -77,19 +78,6 @@ func TestRocksDBSSTCorruption(t *testing.T) {
 
 	// Open the database and write some data
 	db, err := grocksdb.OpenDb(dbOptions, dir)
-	require.NoError(t, err)
-	opts := grocksdb.NewDefaultWriteOptions()
-	opts.SetSync(true)
-
-	for j := 0; j < numKeys; j++ {
-		key := []byte(fmt.Sprintf("key-%d", j))
-		value := []byte(fmt.Sprintf("value-%d", j))
-		err := db.Put(opts, key, value)
-		require.NoError(t, err)
-	}
-	// Force Flush WAL to sstable
-	db.Close()
-	db, err = grocksdb.OpenDb(dbOptions, dir)
 	require.NoError(t, err)
 	verifyRocksDBIntegrity(t, db, numKeys)
 	db.Close()
