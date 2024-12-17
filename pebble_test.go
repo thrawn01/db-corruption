@@ -12,44 +12,38 @@ import (
 	"testing"
 )
 
-func TestWALCorruption(t *testing.T) {
-	const numIterations = 1
+func TestPebbleWALCorruption(t *testing.T) {
 	const numKeys = 1000
 
-	for i := 0; i < numIterations; i++ {
-		t.Run(fmt.Sprintf("iteration-%d", i), func(t *testing.T) {
-			dir, err := os.MkdirTemp("", "pebble-test")
-			require.NoError(t, err)
-			defer os.RemoveAll(dir)
+	dir, err := os.MkdirTemp("", "pebble-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
-			// Open the database and write some data
-			db, err := pebble.Open(dir, &pebble.Options{})
-			require.NoError(t, err)
+	// Open the database and write some data
+	db, err := pebble.Open(dir, &pebble.Options{})
+	require.NoError(t, err)
 
-			for j := 0; j < numKeys; j++ {
-				key := []byte(fmt.Sprintf("key-%d", j))
-				value := []byte(fmt.Sprintf("value-%d", j))
-				err := db.Set(key, value, nil)
-				require.NoError(t, err)
-			}
-			require.NoError(t, db.Close())
-
-			//verifyIntegrity(t, dir, numKeys)
-
-			// Find the WAL file
-			walFile, err := findWALFile(dir)
-			require.NoError(t, err)
-
-			// Corrupt the WAL file by flipping a random byte
-			corruptWALFile(t, walFile)
-
-			verifyIntegrity(t, dir, numKeys)
-
-		})
+	for j := 0; j < numKeys; j++ {
+		key := []byte(fmt.Sprintf("key-%d", j))
+		value := []byte(fmt.Sprintf("value-%d", j))
+		err := db.Set(key, value, nil)
+		require.NoError(t, err)
 	}
+	require.NoError(t, db.Close())
+
+	//verifyPebbleIntegrity(t, dir, numKeys)
+
+	// Find the WAL file
+	walFile, err := findWALFile(dir)
+	require.NoError(t, err)
+
+	// Corrupt the WAL file by flipping a random byte
+	corruptWALFile(t, walFile)
+
+	verifyPebbleIntegrity(t, dir, numKeys)
 }
 
-func TestDatabaseFileCorruption(t *testing.T) {
+func TestPebbleSSTCorruption(t *testing.T) {
 	const numKeys = 1000
 	dir, err := os.MkdirTemp("", "pebble-test")
 	require.NoError(t, err)
@@ -69,15 +63,16 @@ func TestDatabaseFileCorruption(t *testing.T) {
 
 	// Reopening the database appears to force a WAL flush
 	// (likely a better way to do this, but I don't know pebble)
-	verifyIntegrity(t, dir, numKeys)
+	verifyPebbleIntegrity(t, dir, numKeys)
 
-	dbFile, err := findDatabaseFile(dir)
+	dbFile, err := findSSTFile(dir)
 	require.NoError(t, err)
 
 	// Corrupt the database file by flipping a random byte
-	corruptDatabaseFile(t, dbFile)
+	// Offset 3200 always results in a checksum miss match for the SSTable
+	corruptSSTFile(t, dbFile, 3200)
 
-	verifyIntegrity(t, dir, numKeys)
+	verifyPebbleIntegrity(t, dir, numKeys)
 
 	// Open the database and write MORE data to see if corruption lingers or if new data
 	// can be written into a corrupt database.
@@ -94,7 +89,7 @@ func TestDatabaseFileCorruption(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	fmt.Printf("Verifying corrupt database file\n")
-	verifyIntegrity(t, dir, numKeys+1000)
+	verifyPebbleIntegrity(t, dir, numKeys+1000)
 
 	// Force compaction over corrupted keys
 	db, err = pebble.Open(dir, &pebble.Options{})
@@ -103,11 +98,10 @@ func TestDatabaseFileCorruption(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	fmt.Printf("Verifying corrupt database file again\n")
-	verifyIntegrity(t, dir, numKeys+1000)
+	verifyPebbleIntegrity(t, dir, numKeys+1000)
 }
 
-func verifyIntegrity(t *testing.T, dir string, numKeys int) {
-	// Try to reopen the database
+func verifyPebbleIntegrity(t *testing.T, dir string, numKeys int) {
 	db, err := pebble.Open(dir, &pebble.Options{})
 	if err != nil {
 		t.Logf("Failed to open corrupted database: %v", err)
@@ -137,6 +131,7 @@ func findWALFile(dir string) (string, error) {
 		if err != nil {
 			return err
 		}
+		//fmt.Printf("File: %s Size: %d\n", path, info.Size())
 		if filepath.Ext(path) == ".log" {
 			walFile = path
 			return filepath.SkipAll
@@ -165,35 +160,38 @@ func corruptWALFile(t *testing.T, filename string) {
 	require.NoError(t, os.WriteFile(filename, data, 0644))
 }
 
-func findDatabaseFile(dir string) (string, error) {
+func findSSTFile(dir string) (string, error) {
 	var dbFile string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("File: %s Size: %d\n", path, info.Size())
 		if filepath.Ext(path) == ".sst" {
-			//fmt.Printf("file: %s Size: %d\n", path, info.Size())
+			fmt.Printf("file: %s Size: %d\n", path, info.Size())
 			dbFile = path
 			return filepath.SkipAll
 		}
 		return nil
 	})
 	if dbFile == "" {
-		return "", fmt.Errorf("database file not found")
+		return "", fmt.Errorf("sst file not found")
 	}
 	return dbFile, err
 }
 
-func corruptDatabaseFile(t *testing.T, filename string) {
+func corruptSSTFile(t *testing.T, filename string, offset int) {
 	t.Helper()
 
 	data, err := os.ReadFile(filename)
 	require.NoError(t, err)
 	require.False(t, len(data) == 0)
 
-	// Choose a random byte and bit to flip
-	byteIndex := rand.Intn(len(data))
-	byteIndex = 3200 // This index always results in a checksum miss match for the SSTable
+	byteIndex := offset
+	if offset == 0 {
+		// Choose a random byte and bit to flip
+		byteIndex = rand.Intn(len(data))
+	}
 
 	t.Logf("Corrupting Database Offset: %d", byteIndex)
 	data[byteIndex] = 0xFF
